@@ -1,0 +1,31 @@
+{
+  "name": "servicio-c",
+  "version": "1.0.0",
+  "description": "Servicio comunitario detector de ref bibliograficas",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@tavily/core": "^0.6.3",
+    "axios": "^1.13.2",
+    "dotenv": "^17.2.3",
+    "duck-duck-scrape": "^2.2.7",
+    "express": "^5.2.1",
+    "fetch": "^1.1.0",
+    "fs": "^0.0.1-security",
+    "google-scholar-scraper": "^1.2.0",
+    "groq-sdk": "^0.37.0",
+    "multer": "^2.0.2",
+    "node-fetch": "^2.7.0",
+    "ollama": "^0.6.3",
+    "pdfjs-dist": "^5.4.449",
+    "pdfreader": "^3.0.8",
+    "pug": "^3.0.3"
+  }
+}
