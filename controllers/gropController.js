@@ -286,7 +286,7 @@ async function procesarConIdentificadoresExistentes(ref, identificadores) {
 
   // Enlaces adicionales según tipo
   if (ref.tipo_inferido === "revista") {
-    enlaces.google_scholar = `https://gemini.google.com/app?hl=es${encodeURIComponent(
+    enlaces.google_scholar = `https://scholar.google.com/scholar?q=${encodeURIComponent(
       `"${ref.titulo}" ${ref.autor}`,
     )}`;
     enlaces.scielo = `https://search.scielo.org/?q=${encodeURIComponent(
@@ -599,46 +599,98 @@ function esRevistaLatinoamericana(ref) {
   return palabrasClave.some((palabra) => textoBusqueda.includes(palabra));
 }
 
+/**
+ * Busca metadatos en la API de Google Books como respaldo
+ *//*
+async function buscarEnGoogleBooks(titulo, autor) {
+  try {
+    console.log(
+      `     🌐 Buscando en Google Books: ${titulo.substring(0, 50)}...`,
+    );
+
+    // Limpiamos el autor para usar solo el primer apellido si existe, mejora el match
+    const autorBusqueda = autor ? autor.split(",")[0].trim() : "";
+    const query = encodeURIComponent(
+      `intitle:"${titulo}" inauthor:"${autorBusqueda}"`,
+    );
+
+    const response = await axios.get(
+      `https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1`,
+      {
+        timeout: 5000,
+      },
+    );
+
+    if (response.data.items && response.data.items.length > 0) {
+      const info = response.data.items[0].volumeInfo;
+      const ids = info.industryIdentifiers || [];
+
+      // Priorizamos ISBN_13, luego ISBN_10
+      const isbn13 = ids.find((id) => id.type === "ISBN_13")?.identifier;
+      const isbn10 = ids.find((id) => id.type === "ISBN_10")?.identifier;
+
+      return {
+        encontrado: true,
+        isbn: isbn13 || isbn10,
+        titulo: info.title,
+        editorial: info.publisher,
+        fecha: info.publishedDate,
+        enlace: info.previewLink,
+      };
+    }
+  } catch (error) {
+    console.log(`     ⚠️ Google Books error: ${error.message}`);
+  }
+  return { encontrado: false };
+}
+
+/**
+ * Procesa la referencia de tipo libro buscando identificadores faltantes
+ */
 async function procesarLibro(ref) {
   let datos = {};
   let enlaces = {};
   let estado = "LIBRO_PROCESADO";
 
-  // Buscar ISBN
+  // 1. Intentar obtener ISBN si no viene en la fuente
   if (!ref.identificadores?.isbn) {
-    const isbnInfo = await buscarISBNporTitulo(ref.titulo, ref.autor);
-    if (isbnInfo.encontrado) {
+    // Intento 1: OpenLibrary
+    let isbnInfo = await buscarISBNporTitulo(ref.titulo, ref.autor);
+
+    // Intento 2: Google Books con la nueva lógica de reintentos
+    if (!isbnInfo.encontrado) {
+      isbnInfo = await buscarEnGoogleBooks(ref.titulo, ref.autor);
+    }
+
+    if (isbnInfo.encontrado && isbnInfo.isbn) {
       datos.isbn = isbnInfo.isbn;
       datos.titulo_verificado = isbnInfo.titulo;
       datos.editorial_verificada = isbnInfo.editorial;
-      estado = "ISBN_ENCONTRADO";
+      if (isbnInfo.enlace) enlaces.google_preview = isbnInfo.enlace;
+      estado = "ISBN_ENCONTRADO_API";
     }
+  } else {
+    datos.isbn = ref.identificadores.isbn;
+    estado = "ISBN_EN_FUENTE";
   }
 
-  // Enlaces de búsqueda para libros
-  enlaces.worldcat = `https://www.worldcat.org/search?q=${encodeURIComponent(
-    `"${ref.titulo}" ${ref.autor}`,
-  )}`;
-  enlaces.google_books = `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(
-    ref.titulo,
-  )}`;
-  enlaces.openlibrary = `https://openlibrary.org/search?q=${encodeURIComponent(
-    ref.titulo,
-  )}`;
+  // 2. Enlaces de búsqueda
+  enlaces.worldcat = `https://www.worldcat.org/search?q=${encodeURIComponent(`"${ref.titulo}" ${ref.autor || ""}`)}`;
+  enlaces.google_books = `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(ref.titulo)}`;
 
-  // Si tiene ISBN, añadir enlaces específicos
   if (datos.isbn) {
     enlaces.isbn_search = `https://isbnsearch.org/isbn/${datos.isbn}`;
-    enlaces.isbndb = `https://isbndb.com/book/${datos.isbn}`;
+    enlaces.worldcat_isbn = `https://www.worldcat.org/isbn/${datos.isbn}`;
   }
 
-  // Para libros venezolanos/latinoamericanos
+  // 3. Caso especial Venezuela/Nueva Sociedad
   if (
-    ref.editorial?.includes("Nueva Sociedad") ||
-    ref.fuente.includes("Caracas")
+    ref.fuente?.toLowerCase().includes("nueva sociedad") ||
+    ref.fuente?.toLowerCase().includes("caracas")
   ) {
-    enlaces.bnv = "https://www.bnv.gob.ve/";
-    enlaces.catalogobnv = "https://catalogo.bnv.gob.ve/";
+    enlaces.biblioteca_nacional_ve = "https://catalogo.bnv.gob.ve/";
+    // Este libro específico suele estar en el catálogo de Nueva Sociedad
+    enlaces.editorial_nueva_sociedad = "https://nuso.org/biblioteca/";
   }
 
   return {
@@ -647,13 +699,11 @@ async function procesarLibro(ref) {
     datos_libro: datos,
     enlaces: enlaces,
     estado: estado,
-    nota:
-      estado === "ISBN_ENCONTRADO"
-        ? "ISBN encontrado"
-        : "Buscar manualmente el ISBN",
+    nota: datos.isbn
+      ? "ISBN recuperado exitosamente."
+      : "No se halló ISBN en bases de datos digitales.",
   };
 }
-
 async function buscarISBNporTitulo(titulo, autor) {
   try {
     // OpenLibrary
@@ -914,4 +964,64 @@ function generarRecomendacionesFinales(referencias) {
   }
 
   return recomendaciones;
+}
+
+async function buscarEnGoogleBooks(titulo, autor) {
+  // Función interna para realizar la petición
+  const ejecutarBusqueda = async (queryTerm) => {
+    try {
+      const q = encodeURIComponent(queryTerm);
+      const response = await axios.get(
+        `https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=1`,
+        {
+          timeout: 5000,
+        },
+      );
+      return response.data.items && response.data.items.length > 0
+        ? response.data.items[0].volumeInfo
+        : null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  console.log(`     🌐 Buscando en Google Books...`);
+
+  // Limpiamos el autor (primer apellido)
+  const primerAutor = autor ? autor.split(",")[0].trim() : "";
+
+  // INTENTO 1: Título completo + Autor
+  let info = await ejecutarBusqueda(
+    `intitle:"${titulo}" inauthor:"${primerAutor}"`,
+  );
+
+  // INTENTO 2: Si falla, probamos solo con la primera parte del título (antes del punto) + Autor
+  if (!info && titulo.includes(".")) {
+    const tituloCorto = titulo.split(".")[0].trim();
+    console.log(`     ⚠️ Reintentando con título corto: ${tituloCorto}`);
+    info = await ejecutarBusqueda(
+      `intitle:"${tituloCorto}" inauthor:"${primerAutor}"`,
+    );
+  }
+
+  // INTENTO 3: Solo el título (por si el autor está escrito distinto)
+  if (!info) {
+    info = await ejecutarBusqueda(`intitle:"${titulo.split(".")[0].trim()}"`);
+  }
+
+  if (info) {
+    const ids = info.industryIdentifiers || [];
+    const isbn13 = ids.find((id) => id.type === "ISBN_13")?.identifier;
+    const isbn10 = ids.find((id) => id.type === "ISBN_10")?.identifier;
+
+    return {
+      encontrado: true,
+      isbn: isbn13 || isbn10,
+      titulo: info.title,
+      editorial: info.publisher,
+      enlace: info.previewLink,
+    };
+  }
+
+  return { encontrado: false };
 }

@@ -1,0 +1,63 @@
+doctype html
+html(lang="es")
+  head
+    title Procesador de Bibliografía
+    script(src="https://cdn.tailwindcss.com")
+    meta(charset="UTF-8")
+  body(class="bg-gray-50 p-8")
+    .max-w-6xl.mx-auto
+      header(class="mb-8 border-b pb-4")
+        h1(class="text-3xl font-bold text-gray-800") 📚 Resultado del Análisis
+        p(class="text-gray-600") Tiempo de procesamiento: #{tiempo_procesamiento}
+
+      // --- Sección de Estadísticas ---
+      section(class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8")
+        div(class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500")
+          p(class="text-sm text-gray-500 uppercase font-bold") Total
+          p(class="text-2xl font-black") #{total_referencias}
+        div(class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500")
+          p(class="text-sm text-gray-500 uppercase font-bold") Con DOI
+          p(class="text-2xl font-black") #{estadisticas.identificadores_encontrados.doi}
+        div(class="bg-white p-4 rounded-lg shadow border-l-4 border-purple-500")
+          p(class="text-sm text-gray-500 uppercase font-bold") Con ISBN
+          p(class="text-2xl font-black") #{estadisticas.identificadores_encontrados.isbn}
+        div(class="bg-white p-4 rounded-lg shadow border-l-4 border-orange-500")
+          p(class="text-sm text-gray-500 uppercase font-bold") Éxito
+          p(class="text-2xl font-black") #{estadisticas.porcentaje_exito}%
+
+      // --- Listado de Referencias ---
+      section(class="space-y-6")
+        each ref, index in referencias
+          article(class="bg-white p-6 rounded-xl shadow-sm border border-gray-200")
+            .flex.justify-between.items-start
+              span(class="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-500") # #{index + 1}
+              span(class=`text-xs font-bold px-2 py-1 rounded uppercase ${ref.estado.includes('ENCONTRADO') ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`) #{ref.estado}
+            
+            h3(class="text-lg font-semibold text-blue-900 mt-2") #{ref.titulo}
+            p(class="text-gray-700") 
+              strong Autor: 
+              | #{ref.autor} (#{ref.año})
+            p(class="text-sm text-gray-500 italic mt-1") #{ref.fuente}
+
+            // --- Enlaces Dinámicos ---
+            .mt-4.flex.flex-wrap.gap-2
+              if ref.enlaces.doi
+                a(href=ref.enlaces.doi target="_blank" class="text-xs bg-blue-600 text-white px-3 py-1 rounded-full hover:bg-blue-700") 🔗 DOI
+              if ref.enlaces.google_scholar
+                a(href=ref.enlaces.google_scholar target="_blank" class="text-xs bg-gray-800 text-white px-3 py-1 rounded-full hover:bg-black") 🎓 Scholar
+              if ref.enlaces.scielo
+                a(href=ref.enlaces.scielo target="_blank" class="text-xs bg-red-500 text-white px-3 py-1 rounded-full hover:bg-red-600") SciELO
+              if ref.enlaces.worldcat
+                a(href=ref.enlaces.worldcat target="_blank" class="text-xs bg-blue-400 text-white px-3 py-1 rounded-full hover:bg-blue-500") 🌐 WorldCat
+              if ref.enlaces.url_directa
+                a(href=ref.enlaces.url_directa target="_blank" class="text-xs bg-green-600 text-white px-3 py-1 rounded-full hover:bg-green-700") 📄 PDF/Link
+
+      // --- Recomendaciones ---
+      if recomendaciones.length > 0
+        section(class="mt-12 bg-blue-50 p-6 rounded-xl border border-blue-200")
+          h2(class="text-xl font-bold text-blue-800 mb-4") 💡 Recomendaciones del Sistema
+          ul(class="list-disc ml-5 space-y-2")
+            each rec in recomendaciones
+              li(class="text-blue-900")
+                strong #{rec.mensaje} 
+                span(class="block text-sm text-blue-700") Sugerencia: #{rec.accion}
