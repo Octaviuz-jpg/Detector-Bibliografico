@@ -136,29 +136,45 @@ export const procesarBibliografiaHibrida = async (req, res) => {
 /**
  * 🛠️ INTEGRACIÓN DEL JUEZ DE IA (Manteniendo tu estructura original)
  */
-async function obtenerDatosExtraObra(titulo) {
+/**
+ * 🛠️ OBTENER METADATOS CON JUEZ DE IA
+ */
+async function obtenerDatosExtraObra(titulo, autores) {
   try {
     const tituloLimpio = titulo.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
-    if (tituloLimpio.length < 8)
-      return { doi: null, url: null, issn: null, isbn: null };
+
+    // Extraemos el apellido para meterlo en la búsqueda global
+    const apellidoAutor =
+      autores && autores.length > 0 ? autores[0].split(" ").pop() : "";
+
+    if (tituloLimpio.length < 5) return { doi: null, issn: null, isbn: null };
+
+    // Construimos una sola cadena de búsqueda: "Título Apellido"
+    // Esto es mucho más efectivo en Crossref que separar por campos
+    const queryGlobal = `${tituloLimpio} ${apellidoAutor}`.trim();
+
+    console.log(`\n--- DEBUG: ${tituloLimpio.substring(0, 30)}... ---`);
+    console.log(`🔍 Query Enviada: "${queryGlobal}"`);
 
     const res = await axios.get("https://api.crossref.org/works", {
-      params: { "query.bibliographic": tituloLimpio, rows: 1 },
-      timeout: 10000,
+      params: {
+        "query.bibliographic": queryGlobal,
+        rows: 1,
+      },
+      timeout: 8000,
     });
 
     const item = res.data.message.items?.[0];
-    if (!item) return { doi: null, url: null, issn: null, isbn: null };
 
-    const tituloAPI = item.title ? item.title[0] : "";
+    if (!item) {
+      console.log(`❌ Crossref no encontró nada.`);
+      return { doi: null, issn: null, isbn: null };
+    }
 
-    // --- MEJORA EN EL PROMPT Y LA LÓGICA DE DECISIÓN ---
-    const promptIA = `Analiza si estos dos títulos representan la misma obra (libro, artículo o conferencia). 
-    Ignora diferencias de edición, puntuación, subtítulos o si uno está más completo que el otro.
-    Responde UNICAMENTE con la letra 'S' si son la misma obra o 'N' si son distintas.
-    
-    Título A: "${tituloLimpio}"
-    Título B: "${tituloAPI}"`;
+    const tituloAPI = item.title ? item.title[0] : "Sin título";
+
+    // 🤖 EL JUEZ DE IA (Groq)
+    const promptIA = `¿Es "${tituloLimpio}" la misma obra que "${tituloAPI}"? Responde solo S o N.`;
 
     const validacion = await groq.chat.completions.create({
       messages: [{ role: "user", content: promptIA }],
@@ -166,35 +182,18 @@ async function obtenerDatosExtraObra(titulo) {
       temperature: 0,
     });
 
-    const respuestaIA = validacion.choices[0].message.content
-      .trim()
-      .toUpperCase();
+    const decision = validacion.choices[0].message.content.trim().toUpperCase();
+    console.log(`📡 API devolvió: ${tituloAPI.substring(0, 40)}...`);
+    console.log(`🤖 IA decidió: [${decision}]`);
 
-    // Log para que veas en la consola qué está pasando
-    console.log(
-      `[IA JUDGE] PDF: ${tituloLimpio}... | API: ${tituloAPI}... | Decisión: ${respuestaIA}`,
-  
-    );
+    if (decision.includes("S")) {
+      let issn = item.ISSN && item.ISSN.length > 0 ? item.ISSN[0] : null;
+      let isbn =
+        item.ISBN && item.ISBN.length > 0
+          ? item.ISBN[0].split("/").pop()
+          : null;
 
-    // Usamos .includes para capturar la 'S' aunque la IA responda "S." o "Sí"
-    if (respuestaIA.includes("S") && !respuestaIA.includes("N")) {
-      let issn = null;
-      let isbn = null;
-
-      const tiposAcademicos = [
-        "journal-article",
-        "book",
-        "proceedings-article",
-        "monograph",
-        "book-chapter",
-      ];
-      if (tiposAcademicos.includes(item.type)) {
-        issn = item.ISSN && item.ISSN.length > 0 ? item.ISSN[0] : null;
-        isbn =
-          item.ISBN && item.ISBN.length > 0
-            ? item.ISBN[0].split("/").pop()
-            : null;
-      }
+      console.log(`✅ MATCH: ISBN[${isbn}] ISSN[${issn}]`);
 
       return {
         doi: item.DOI ? `https://doi.org/${item.DOI}` : null,
@@ -202,12 +201,13 @@ async function obtenerDatosExtraObra(titulo) {
         issn: issn,
         isbn: isbn,
       };
+    } else {
+      console.log(`⚠️ RECHAZADO POR IA.`);
+      return { doi: null, issn: null, isbn: null };
     }
-
-    return { doi: null, url: null, issn: null, isbn: null };
   } catch (e) {
-    console.error("Error en obtenerDatosExtraObra:", e.message);
-    return { doi: null, url: null, issn: null, isbn: null };
+    console.error(`🚨 ERROR:`, e.message);
+    return { doi: null, issn: null, isbn: null };
   }
 }
 /**
