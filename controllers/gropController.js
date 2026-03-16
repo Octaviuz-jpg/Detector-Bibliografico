@@ -47,7 +47,6 @@ export const procesarBibliografiaHibrida = async (req, res) => {
 
       let doiFinal = ref.doi_pdf || null;
       let urlObra = ref.url_pdf || null;
-      // NUEVAS VARIABLES PARA ISBN/ISSN
       let issn = null;
       let isbn = null;
 
@@ -55,7 +54,8 @@ export const procesarBibliografiaHibrida = async (req, res) => {
         console.log(
           `🔍 Buscando metadatos para: "${titulo.substring(0, 35)}..."`,
         );
-        const dataExterna = await obtenerDatosExtraObra(titulo);
+        // 🔥 Pasamos autoresPDF para ayudar a Google Books si Crossref falla
+        const dataExterna = await obtenerDatosExtraObra(titulo, autoresPDF);
         doiFinal = doiFinal || dataExterna.doi;
         urlObra = urlObra || dataExterna.url;
         issn = dataExterna.issn;
@@ -119,6 +119,9 @@ export const procesarBibliografiaHibrida = async (req, res) => {
             : "Ninguna",
         autores_validados: autoresValidados,
       });
+
+      // 🔥 PAUSA ANTI-BLOQUEO ENTRE REFERENCIAS (2 segundos)
+      await new Promise((r) => setTimeout(r, 2000));
     }
 
     res.json({ success: true, data: resultadosFinales });
@@ -128,91 +131,105 @@ export const procesarBibliografiaHibrida = async (req, res) => {
 };
 
 /**
- * 🔍 BUSCAR DATOS DE LA OBRA (DOI, URL, ISSN, ISBN)
- * Se actualiza a OpenAlex para obtener identificadores bibliográficos
- */
-/**
- * 
-/**
- * 🛠️ INTEGRACIÓN DEL JUEZ DE IA (Manteniendo tu estructura original)
- */
-/**
- * 🛠️ OBTENER METADATOS CON JUEZ DE IA
+ * 🛠️ OBTENER METADATOS CON JUEZ DE IA + RESCATE GOOGLE BOOKS
  */
 async function obtenerDatosExtraObra(titulo, autores) {
   try {
     const tituloLimpio = titulo.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
-
-    // Extraemos el apellido para meterlo en la búsqueda global
     const apellidoAutor =
       autores && autores.length > 0 ? autores[0].split(" ").pop() : "";
 
     if (tituloLimpio.length < 5) return { doi: null, issn: null, isbn: null };
 
-    // Construimos una sola cadena de búsqueda: "Título Apellido"
-    // Esto es mucho más efectivo en Crossref que separar por campos
     const queryGlobal = `${tituloLimpio} ${apellidoAutor}`.trim();
-
     console.log(`\n--- DEBUG: ${tituloLimpio.substring(0, 30)}... ---`);
-    console.log(`🔍 Query Enviada: "${queryGlobal}"`);
 
+    // 1. INTENTO CON CROSSREF
     const res = await axios.get("https://api.crossref.org/works", {
-      params: {
-        "query.bibliographic": queryGlobal,
-        rows: 1,
-      },
+      params: { "query.bibliographic": queryGlobal, rows: 1 },
       timeout: 8000,
     });
 
-    const item = res.data.message.items?.[0];
+    let item = res.data.message.items?.[0];
+    let doi = null,
+      issn = null,
+      isbn = null,
+      url = null;
 
-    if (!item) {
-      console.log(`❌ Crossref no encontró nada.`);
-      return { doi: null, issn: null, isbn: null };
+    if (item) {
+      const tituloAPI = item.title ? item.title[0] : "Sin título";
+      const promptIA = `¿Es "${tituloLimpio}" la misma obra que "${tituloAPI}"? Responde solo S o N.`;
+
+      const validacion = await groq.chat.completions.create({
+        messages: [{ role: "user", content: promptIA }],
+        model: MODELO_INTELIGENTE,
+        temperature: 0,
+      });
+
+      const decision = validacion.choices[0].message.content
+        .trim()
+        .toUpperCase();
+      if (decision.includes("S")) {
+        issn = item.ISSN && item.ISSN.length > 0 ? item.ISSN[0] : null;
+        isbn =
+          item.ISBN && item.ISBN.length > 0
+            ? item.ISBN[0].split("/").pop()
+            : null;
+        doi = item.DOI ? `https://doi.org/${item.DOI}` : null;
+        url = item.URL || doi;
+      }
     }
 
-    const tituloAPI = item.title ? item.title[0] : "Sin título";
+    // 2. 🔥 RESCATE CON GOOGLE BOOKS (Solo si no hay ISBN)
+    if (!isbn) {
+      try {
+        await new Promise((r) => setTimeout(r, 1500)); // Pausa para evitar 429
+        const gRes = await axios.get(
+          "https://www.googleapis.com/books/v1/volumes",
+          {
+            params: {
+              q: `intitle:${tituloLimpio} inauthor:${apellidoAutor}`,
+              maxResults: 1,
+            },
+            timeout: 5000,
+          },
+        );
 
-    // 🤖 EL JUEZ DE IA (Groq)
-    const promptIA = `¿Es "${tituloLimpio}" la misma obra que "${tituloAPI}"? Responde solo S o N.`;
+        const libro = gRes.data.items?.[0]?.volumeInfo;
+        if (libro) {
+          // Validamos con IA el resultado de Google también
+          const promptIA_G = `¿Es el libro "${tituloLimpio}" el mismo que "${libro.title}"? Responde S o N.`;
+          const validacionG = await groq.chat.completions.create({
+            messages: [{ role: "user", content: promptIA_G }],
+            model: MODELO_INTELIGENTE,
+            temperature: 0,
+          });
 
-    const validacion = await groq.chat.completions.create({
-      messages: [{ role: "user", content: promptIA }],
-      model: "llama-3.3-70b-versatile",
-      temperature: 0,
-    });
-
-    const decision = validacion.choices[0].message.content.trim().toUpperCase();
-    console.log(`📡 API devolvió: ${tituloAPI.substring(0, 40)}...`);
-    console.log(`🤖 IA decidió: [${decision}]`);
-
-    if (decision.includes("S")) {
-      let issn = item.ISSN && item.ISSN.length > 0 ? item.ISSN[0] : null;
-      let isbn =
-        item.ISBN && item.ISBN.length > 0
-          ? item.ISBN[0].split("/").pop()
-          : null;
-
-      console.log(`✅ MATCH: ISBN[${isbn}] ISSN[${issn}]`);
-
-      return {
-        doi: item.DOI ? `https://doi.org/${item.DOI}` : null,
-        url: item.URL || (item.DOI ? `https://doi.org/${item.DOI}` : null),
-        issn: issn,
-        isbn: isbn,
-      };
-    } else {
-      console.log(`⚠️ RECHAZADO POR IA.`);
-      return { doi: null, issn: null, isbn: null };
+          if (
+            validacionG.choices[0].message.content
+              .trim()
+              .toUpperCase()
+              .includes("S")
+          ) {
+            const ids = libro.industryIdentifiers || [];
+            isbn =
+              ids.find((id) => id.type.includes("ISBN"))?.identifier || isbn;
+            url = url || libro.infoLink;
+            console.log(`✅ ISBN Rescatado de Google Books: ${isbn}`);
+          }
+        }
+      } catch (ge) {
+        console.log("⚠️ Google Books saturado o sin resultados.");
+      }
     }
+
+    return { doi, issn, isbn, url };
   } catch (e) {
     console.error(`🚨 ERROR:`, e.message);
     return { doi: null, issn: null, isbn: null };
   }
 }
-/**
- * 🎓 OBTENER MÉTRICAS DE AUTOR (Sin cambios)
- */
+
 async function obtenerMetricasCompletas(nombre) {
   try {
     const s2Fields = "hIndex,externalIds,affiliations,name";
@@ -265,9 +282,6 @@ async function obtenerMetricasCompletas(nombre) {
   }
 }
 
-/**
- * 🌐 BÚSQUEDA EN CROSSREF (Sin cambios)
- */
 async function obtenerAutoresDesdeCrossref(titulo) {
   try {
     const url = `https://api.crossref.org/works?query.title=${encodeURIComponent(titulo)}&rows=1`;
