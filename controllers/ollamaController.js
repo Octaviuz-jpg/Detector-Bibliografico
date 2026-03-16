@@ -3,8 +3,8 @@ import { search } from "duck-duck-scrape"; // Importamos el buscador libre
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export const procesarConOllama = async (req, res) => {
   try {
-    const texto = req.bibliografia;
-    console.log(req.bibliografia);
+    const texto = req.textoExtraido; // Ahora lee lo que dejó PDF.js
+    console.log(texto);
 
     // --- TU LÓGICA DE OLLAMA (SIN TOCAR) ---
     const prompt = `
@@ -60,6 +60,4 @@ ${texto}
     console.error("Error procesando con Ollama:", error);
     res.status(500).json({ error: "Error procesando con Ollama" });
   }
-
-  
 };

@@ -3,7 +3,7 @@ import multer from "multer";
 import { extractText } from "./middleware/extractText.js"; // 👈 importa tu middleware
 //import { procesarConOllama } from "./controllers/ollamaController.js"; // 👈 importa el controlador
 import { extractBibliografia } from "./middleware/extractBibliografia.js"; // 👈 importa el middleware de bibliografía
-import { procesarConOllama } from "./controllers/gropController.js"; // 👈 importa el controlador de Groq
+import { procesarBibliografiaHibrida } from "./controllers/gropController.js"; // 👈 importa el controlador de Groq
 
 const app = express();
 const port = 3000;
@@ -23,7 +23,7 @@ app.post(
   upload.single("pdf"),
   extractText,
   extractBibliografia,
-  procesarConOllama
+  procesarBibliografiaHibrida,
 );
 
 // Ruta para mostrar la vista
