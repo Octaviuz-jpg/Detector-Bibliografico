@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // --- CONFIGURACIÓN ---
-const API_KEY = "";
+const API_KEY = "TU_API_KEY_DE_GROQ_AQUI"; // Reemplaza con tu API Key de Groq
 const MODELO_INTELIGENTE = "llama-3.3-70b-versatile";
 const groq = new Groq({ apiKey: API_KEY });
 
