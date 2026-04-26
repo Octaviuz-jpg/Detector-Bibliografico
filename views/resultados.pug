@@ -1,63 +1,122 @@
 doctype html
 html(lang="es")
   head
-    title Procesador de Bibliografía
-    script(src="https://cdn.tailwindcss.com")
     meta(charset="UTF-8")
-  body(class="bg-gray-50 p-8")
-    .max-w-6xl.mx-auto
-      header(class="mb-8 border-b pb-4")
-        h1(class="text-3xl font-bold text-gray-800") 📚 Resultado del Análisis
-        p(class="text-gray-600") Tiempo de procesamiento: #{tiempo_procesamiento}
+    meta(name="viewport", content="width=device-width, initial-scale=1.0")
+    title Auditoría Bibliográfica | UNEG Sede Atlántico
+    script(src="https://cdn.tailwindcss.com")
+    link(rel="stylesheet", href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css")
+  
+  body(class="bg-gray-50 text-gray-800 font-sans p-6")
+    .max-w-7xl.mx-auto
+      header.mb-8.flex.flex-wrap.justify-between.items-end.gap-4
+        div
+          h1.text-3xl.font-bold.text-indigo-900 Auditoría de Producción Científica
+          if auditoria_bibliometrica && auditoria_bibliometrica.analisis_tema
+            p.text-gray-600 Tema: 
+              span.font-semibold.italic #{auditoria_bibliometrica.analisis_tema.original} 
+              | (#{auditoria_bibliometrica.analisis_tema.ingles})
+        
+        if auditoria_bibliometrica && data
+          - const jsonData = encodeURIComponent(JSON.stringify({auditoria: auditoria_bibliometrica, referencias: data}, null, 2))
+          a.bg-slate-800.text-white.px-5.py-2.rounded-lg.text-sm.font-bold.shadow-lg.transition-all(
+            href=`data:text/json;charset=utf-8,${jsonData}`
+            download=`reporte_auditoria_${new Date().getTime()}.json`
+            class="hover:bg-slate-700 hover:scale-105 active:scale-95"
+          )
+            i.fas.fa-file-code.mr-2
+            | Descargar Raw JSON
 
-      // --- Sección de Estadísticas ---
-      section(class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8")
-        div(class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500")
-          p(class="text-sm text-gray-500 uppercase font-bold") Total
-          p(class="text-2xl font-black") #{total_referencias}
-        div(class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500")
-          p(class="text-sm text-gray-500 uppercase font-bold") Con DOI
-          p(class="text-2xl font-black") #{estadisticas.identificadores_encontrados.doi}
-        div(class="bg-white p-4 rounded-lg shadow border-l-4 border-purple-500")
-          p(class="text-sm text-gray-500 uppercase font-bold") Con ISBN
-          p(class="text-2xl font-black") #{estadisticas.identificadores_encontrados.isbn}
-        div(class="bg-white p-4 rounded-lg shadow border-l-4 border-orange-500")
-          p(class="text-sm text-gray-500 uppercase font-bold") Éxito
-          p(class="text-2xl font-black") #{estadisticas.porcentaje_exito}%
-
-      // --- Listado de Referencias ---
-      section(class="space-y-6")
-        each ref, index in referencias
-          article(class="bg-white p-6 rounded-xl shadow-sm border border-gray-200")
-            .flex.justify-between.items-start
-              span(class="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-500") # #{index + 1}
-              span(class=`text-xs font-bold px-2 py-1 rounded uppercase ${ref.estado.includes('ENCONTRADO') ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`) #{ref.estado}
+      if auditoria_bibliometrica
+        section.grid.grid-cols-1.gap-6.mb-10(class="md:grid-cols-2")
+          
+          - const p = auditoria_bibliometrica.ley_price
+          .bg-white.p-6.rounded-xl.shadow-sm.border-l-8(class=`border-${p.color}-500`)
+            .flex.items-center.justify-between.mb-4
+              div
+                h2.text-xl.font-black.uppercase.tracking-tighter(class=`text-${p.color}-700`) Ley de Price
+                p.text-xs.text-gray-400 Análisis de Obsolescencia (Corte: 2026)
+              span.px-3.py-1.rounded-full.text-sm.font-bold(class=`bg-${p.color}-100 text-${p.color}-700`) #{p.estado}
             
-            h3(class="text-lg font-semibold text-blue-900 mt-2") #{ref.titulo}
-            p(class="text-gray-700") 
-              strong Autor: 
-              | #{ref.autor} (#{ref.año})
-            p(class="text-sm text-gray-500 italic mt-1") #{ref.fuente}
+            .grid.grid-cols-1.gap-3
+              .p-3.rounded-lg(class=p.cumpleEdadMedia ? 'bg-green-50' : 'bg-red-50')
+                .flex.justify-between.items-center
+                  span.text-sm.font-medium(class=p.cumpleEdadMedia ? 'text-green-800' : 'text-red-800') Edad Media (Meta ≤ 3):
+                  span.text-lg.font-bold(class=p.cumpleEdadMedia ? 'text-green-700' : 'text-red-700') #{p.edadMedia.toFixed(1)} años
+              
+              .p-3.rounded-lg(class=p.cumpleRatioPrice ? 'bg-green-50' : 'bg-red-50')
+                .flex.justify-between.items-center
+                  span.text-sm.font-medium(class=p.cumpleRatioPrice ? 'text-green-800' : 'text-red-800') Actualidad (Meta ≥ 75%):
+                  span.text-lg.font-bold(class=p.cumpleRatioPrice ? 'text-green-700' : 'text-red-700') #{p.porcentaje_actual}%
+                .w-full.bg-gray-200.rounded-full.mt-2(class="h-1.5")
+                  .rounded-full(class=`bg-${p.color}-500 h-1.5` style=`width: ${p.porcentaje_actual}%`)
+            p.text-xs.mt-3.text-gray-500.italic #{p.detalle}
 
-            // --- Enlaces Dinámicos ---
-            .mt-4.flex.flex-wrap.gap-2
-              if ref.enlaces.doi
-                a(href=ref.enlaces.doi target="_blank" class="text-xs bg-blue-600 text-white px-3 py-1 rounded-full hover:bg-blue-700") 🔗 DOI
-              if ref.enlaces.google_scholar
-                a(href=ref.enlaces.google_scholar target="_blank" class="text-xs bg-gray-800 text-white px-3 py-1 rounded-full hover:bg-black") 🎓 Scholar
-              if ref.enlaces.scielo
-                a(href=ref.enlaces.scielo target="_blank" class="text-xs bg-red-500 text-white px-3 py-1 rounded-full hover:bg-red-600") SciELO
-              if ref.enlaces.worldcat
-                a(href=ref.enlaces.worldcat target="_blank" class="text-xs bg-blue-400 text-white px-3 py-1 rounded-full hover:bg-blue-500") 🌐 WorldCat
-              if ref.enlaces.url_directa
-                a(href=ref.enlaces.url_directa target="_blank" class="text-xs bg-green-600 text-white px-3 py-1 rounded-full hover:bg-green-700") 📄 PDF/Link
+          .bg-white.p-6.rounded-xl.shadow-sm.border-l-4.border-blue-500
+            h2.text-lg.font-bold.uppercase.tracking-wider.mb-4 Clasificación de Fuentes
+            .space-y-3
+              - const conteoZonas = {}
+              each ref in auditoria_bibliometrica.ley_bradford_pertinencia
+                - conteoZonas[ref.clasificacion] = (conteoZonas[ref.clasificacion] || 0) + 1
+              
+              each val, key in conteoZonas
+                .flex.items-center.justify-between.bg-blue-50.px-3.py-2.rounded-lg
+                  span.text-xs.font-bold.text-blue-900 #{key}
+                  span.bg-blue-600.text-white.rounded-full(class="text-xs px-2 py-0.5") #{val}
 
-      // --- Recomendaciones ---
-      if recomendaciones.length > 0
-        section(class="mt-12 bg-blue-50 p-6 rounded-xl border border-blue-200")
-          h2(class="text-xl font-bold text-blue-800 mb-4") 💡 Recomendaciones del Sistema
-          ul(class="list-disc ml-5 space-y-2")
-            each rec in recomendaciones
-              li(class="text-blue-900")
-                strong #{rec.mensaje} 
-                span(class="block text-sm text-blue-700") Sugerencia: #{rec.accion}
+      section.space-y-6
+        h2.text-2xl.font-bold.text-gray-700.border-b-2.border-indigo-100.pb-2 Referencias Analizadas
+        
+        each item, i in data
+          - const infoAuditoria = auditoria_bibliometrica.ley_bradford_pertinencia[i]
+          
+          article.bg-white.rounded-2xl.shadow-md.overflow-hidden.border.border-gray-200.transition-all(class="hover:shadow-lg hover:border-indigo-200")
+            .p-6
+              .flex.flex-wrap.justify-between.items-start.gap-4
+                .flex-1
+                  .flex.items-center.gap-2.mb-2
+                    span.font-black.px-2.rounded.bg-indigo-600.text-white.uppercase(class="text-[10px] py-0.5") #{item.referencia_extraida.tipo}
+                    if infoAuditoria
+                      span.font-bold.px-2.rounded.bg-amber-100.text-amber-800(class="text-[10px] py-0.5")
+                        i.fas.fa-layer-group.mr-1
+                        | #{infoAuditoria.clasificacion}
+
+                  h3.text-lg.font-bold.text-gray-900.leading-tight #{item.referencia_extraida.titulo}
+                  p.text-xs.text-gray-500.mt-1 Año: #{item.referencia_extraida.anio} | Área: #{item.referencia_extraida.area_tematica}
+                
+                .bg-gray-50.p-3.rounded-lg.border.border-gray-100(class="min-w-[180px]")
+                  .flex.items-center.justify-between.text-xs.mb-1
+                    span.text-gray-400 DOI:
+                    span(class=infoAuditoria.doi === '✅' ? 'text-green-600' : 'text-red-500') #{infoAuditoria.doi}
+                  .flex.items-center.justify-between.text-xs.mb-1
+                    span.text-gray-400 ISSN/ISBN:
+                    span(class=infoAuditoria.issn_isbn === '✅' ? 'text-green-600' : 'text-red-500') #{infoAuditoria.issn_isbn}
+                  if item.metadatos_fuente && item.metadatos_fuente.sjr
+                    .flex.items-center.justify-between.text-xs
+                      span.text-gray-400 Impacto SJR:
+                      span.font-bold.text-indigo-600 #{item.metadatos_fuente.sjr}
+
+              .mt-4
+                .overflow-x-auto
+                  table.min-w-full(class="text-[11px]")
+                    thead.bg-gray-100.text-gray-600.uppercase
+                      tr
+                        th.px-3.py-1.text-left Investigador
+                        th.px-3.py-1.text-left H-Index
+                        th.px-3.py-1.text-left ORCID / ID
+                    tbody.divide-y.divide-gray-100
+                      each autor in item.investigadores_data
+                        tr
+                          td.px-3.py-1.font-bold.text-gray-700 #{autor.nombre_identificado}
+                          td.px-3.py-1
+                            span.bg-orange-100.text-orange-700.rounded-md(class="px-1.5 py-0.5") #{autor.h_index}
+                          td.px-3.py-1
+                            if autor.orcid && autor.orcid !== 'N/A (No registrado)'
+                              a.text-indigo-600.font-medium(href=`https://orcid.org/${autor.orcid}` target="_blank") #{autor.orcid}
+                            else
+                              span.text-gray-300 N/A
+
+            if item.referencia_extraida.doi_pdf
+              .bg-indigo-50.px-6.py-2.flex.justify-end
+                a.text-indigo-700.text-xs.font-bold(href=item.referencia_extraida.doi_pdf target="_blank") 
+                  | ACCEDER AL RECURSO #[i.fas.fa-external-link-alt.ml-1]
