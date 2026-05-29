@@ -11,6 +11,25 @@ const MODELO_IA = "llama-3.3-70b-versatile";
 const groq = new Groq({ apiKey: API_KEY_GROQ });
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// --- RETRY CON BACKOFF ---
+async function peticionConReintento(fn, contexto, maxIntentos = 3) {
+  for (let i = 0; i < maxIntentos; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err?.response?.status === 429 && i < maxIntentos - 1) {
+        const espera = (i + 1) * 3000;
+        console.warn(`Reintentando [${contexto}] en ${espera}ms (${i + 1}/${maxIntentos})`);
+        await esperar(espera);
+        continue;
+      }
+      manejarErrorApi(err, contexto);
+      return null;
+    }
+  }
+  return null;
+}
+
 // --- CACHÉ EN MEMORIA ---
 const cache = {
   crossref: new Map(),
@@ -191,9 +210,10 @@ async function auditarAutorSemanticScholar(nombreAutor, doi = null) {
       const doiLimpio = doi.replace("https://doi.org/", "");
       let msg = cache.crossref.get(doiLimpio);
       if (!msg) {
-        const resCR = await axios
-          .get(`https://api.crossref.org/works/${doiLimpio}`)
-          .catch((err) => { manejarErrorApi(err, "Crossref autor"); return null; });
+        const resCR = await peticionConReintento(
+          () => axios.get(`https://api.crossref.org/works/${doiLimpio}`),
+          "Crossref autor",
+        );
         if (resCR?.data?.message) {
           msg = resCR.data.message;
           cache.crossref.set(doiLimpio, msg);
@@ -209,28 +229,30 @@ async function auditarAutorSemanticScholar(nombreAutor, doi = null) {
 
     // --- 2. SEMANTIC SCHOLAR ---
     if (orcidEncontrado) {
-      const resS2 = await axios
-        .get(
+      const resS2 = await peticionConReintento(
+        () => axios.get(
           `https://api.semanticscholar.org/graph/v1/author/externalId:ORCID:${orcidEncontrado}`,
           {
             params: { fields: "name,hIndex,authorId,externalIds,affiliations" },
           },
-        )
-        .catch((err) => { manejarErrorApi(err, "S2 ORCID"); return null; });
+        ),
+        "S2 ORCID",
+      );
       if (resS2?.data) datosS2 = resS2.data;
     }
 
     if (!datosS2) {
       const queryTerm = apellido.length > 2 ? apellido : nombreLimpio;
-      const resBus = await axios
-        .get("https://api.semanticscholar.org/graph/v1/author/search", {
+      const resBus = await peticionConReintento(
+        () => axios.get("https://api.semanticscholar.org/graph/v1/author/search", {
           params: {
             query: queryTerm,
             fields: "name,hIndex,externalIds,authorId,affiliations",
             limit: 5,
           },
-        })
-        .catch((err) => { manejarErrorApi(err, "S2 search"); return null; });
+        }),
+        "S2 search",
+      );
 
       if (resBus?.data?.data?.length > 0) {
         const match = resBus.data.data
@@ -282,9 +304,10 @@ async function auditarRevista(ref) {
       if (msg) {
         issn = msg?.ISSN?.[0];
       } else {
-        const resCR = await axios
-          .get(`https://api.crossref.org/works/${doiLimpio}`)
-          .catch((err) => { manejarErrorApi(err, "Crossref ISSN"); return null; });
+        const resCR = await peticionConReintento(
+          () => axios.get(`https://api.crossref.org/works/${doiLimpio}`),
+          "Crossref ISSN",
+        );
         if (resCR?.data?.message) {
           cache.crossref.set(doiLimpio, resCR.data.message);
           issn = resCR.data.message.ISSN?.[0];
@@ -297,15 +320,16 @@ async function auditarRevista(ref) {
       if (cache.elsevier.has(cacheKey)) {
         issn = cache.elsevier.get(cacheKey);
       } else {
-        const resSc = await axios
-          .get("https://api.elsevier.com/content/search/scopus", {
+        const resSc = await peticionConReintento(
+          () => axios.get("https://api.elsevier.com/content/search/scopus", {
             params: {
               query: `SRCTITLE({${revista_nombre.split("-")[0]}})`,
               apiKey: ELSEVIER_KEY,
               count: 1,
             },
-          })
-          .catch((err) => { manejarErrorApi(err, "Elsevier Scopus"); return null; });
+          }),
+          "Elsevier Scopus",
+        );
         issn = resSc?.data?.["search-results"]?.["entry"]?.[0]?.["prism:issn"];
         cache.elsevier.set(cacheKey, issn);
       }
@@ -329,12 +353,13 @@ async function auditarRevista(ref) {
 
     if (!issn) return { indexada: false, sjr: "0" };
 
-    const resM = await axios
-      .get(`https://api.elsevier.com/content/serial/title/issn/${issn}`, {
+    const resM = await peticionConReintento(
+      () => axios.get(`https://api.elsevier.com/content/serial/title/issn/${issn}`, {
         params: { apiKey: ELSEVIER_KEY },
         headers: { Accept: "application/json" },
-      })
-      .catch((err) => { manejarErrorApi(err, "Elsevier metadata"); return null; });
+      }),
+      "Elsevier metadata",
+    );
 
     const meta = resM?.data?.["serial-metadata-response"]?.["entry"]?.[0];
     return {
@@ -379,15 +404,26 @@ async function buscarLibroEnGoogleBooks(titulo, apellidoAutor) {
   }
 }
 
-// --- PROCESAMIENTO EN LOTES PARALELOS ---
-async function procesarLotes(items, fn, concurrency = 5, delayMs = 500) {
-  const resultados = [];
-  for (let i = 0; i < items.length; i += concurrency) {
-    const lote = items.slice(i, i + concurrency);
-    const res = await Promise.allSettled(lote.map(fn));
-    resultados.push(...res.map((r) => (r.status === "fulfilled" ? r.value : null)));
-    if (i + concurrency < items.length) await esperar(delayMs);
+// --- PROCESAMIENTO CONCURRENTE CONTROLADO ---
+async function procesarConcurrente(items, fn, concurrency = 2, spacingMs = 1500) {
+  const resultados = Array(items.length).fill(null);
+  const ejecutando = new Set();
+  let idx = 0;
+
+  async function procesarSiguiente() {
+    const i = idx++;
+    if (i >= items.length) return;
+    const promesa = fn(items[i], i).then((r) => { resultados[i] = r; }).finally(() => ejecutando.delete(promesa));
+    ejecutando.add(promesa);
+    if (ejecutando.size >= concurrency) {
+      await Promise.race(ejecutando);
+    }
+    await esperar(spacingMs);
+    return procesarSiguiente();
   }
+
+  const iniciadores = Array.from({ length: Math.min(concurrency, items.length) }, () => procesarSiguiente());
+  await Promise.allSettled(iniciadores);
   return resultados;
 }
 
@@ -450,8 +486,8 @@ export const procesarBibliografiaHibrida = async (req, res) => {
     const infoTema = dataIA.tema_analizado;
     const listaReferencias = dataIA.referencias || [];
 
-    // Procesar metadatos de fuente en lotes paralelos (5 a la vez)
-    const metadatosLote = await procesarLotes(
+    // Procesar metadatos de fuente (2 concurrentes, 2s entre cada uno)
+    const metadatosLote = await procesarConcurrente(
       listaReferencias,
       async (ref) => {
         if (ref.tipo === "libro") {
@@ -463,12 +499,12 @@ export const procesarBibliografiaHibrida = async (req, res) => {
         }
         return await auditarRevista(ref);
       },
-      5,
-      800,
+      2,
+      2000,
     );
 
-    // Procesar autores en lotes paralelos (3 referencias a la vez)
-    const autoresLote = await procesarLotes(
+    // Procesar autores (2 concurrentes, 2s entre cada referencia)
+    const autoresLote = await procesarConcurrente(
       listaReferencias,
       async (ref) => {
         const listaAutores = Array.isArray(ref.autores_lista)
@@ -483,8 +519,8 @@ export const procesarBibliografiaHibrida = async (req, res) => {
           .map((r) => (r.status === "fulfilled" ? r.value : null))
           .filter(Boolean);
       },
-      3,
-      1000,
+      2,
+      2000,
     );
 
     // Consolidar reporte
