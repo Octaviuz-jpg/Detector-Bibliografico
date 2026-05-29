@@ -18,7 +18,7 @@ async function peticionConReintento(fn, contexto, maxIntentos = 3) {
       return await fn();
     } catch (err) {
       if (err?.response?.status === 429 && i < maxIntentos - 1) {
-        const espera = (i + 1) * 3000;
+        const espera = (i + 1) * 5000;
         console.warn(`Reintentando [${contexto}] en ${espera}ms (${i + 1}/${maxIntentos})`);
         await esperar(espera);
         continue;
@@ -381,9 +381,10 @@ async function buscarLibroEnGoogleBooks(titulo, apellidoAutor) {
 
   try {
     const query = `intitle:"${encodeURIComponent(titulo)}"+inauthor:"${encodeURIComponent(apellidoAutor)}"`;
-    const res = await axios
-      .get(`https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1`)
-      .catch((err) => { manejarErrorApi(err, "Google Books"); return null; });
+    const res = await peticionConReintento(
+      () => axios.get(`https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1`),
+      "Google Books",
+    );
 
     const info = res?.data?.items?.[0]?.volumeInfo;
     let result = null;
@@ -474,7 +475,7 @@ export const procesarBibliografiaHibrida = async (req, res) => {
     const infoTema = dataIA.tema_analizado;
     const listaReferencias = dataIA.referencias || [];
 
-    // Procesar metadatos de fuente (secuencial, 1.5s entre cada uno)
+    // Procesar metadatos de fuente (secuencial, 4s entre cada uno)
     const metadatosLote = await procesarSecuencial(
       listaReferencias,
       async (ref) => {
@@ -487,10 +488,10 @@ export const procesarBibliografiaHibrida = async (req, res) => {
         }
         return await auditarRevista(ref);
       },
-      1500,
+      4000,
     );
 
-    // Procesar autores (secuencial, 2s entre cada referencia)
+    // Procesar autores (secuencial, 4s entre cada referencia)
     const autoresLote = await procesarSecuencial(
       listaReferencias,
       async (ref) => {
@@ -502,7 +503,7 @@ export const procesarBibliografiaHibrida = async (req, res) => {
         for (const nombre of listaAutores) {
           const info = await auditarAutorSemanticScholar(nombre, ref.doi_pdf);
           if (info) resultados.push(info);
-          await esperar(1500);
+          await esperar(3000);
         }
 
         return resultados;
