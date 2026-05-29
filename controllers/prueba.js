@@ -5,8 +5,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // --- CONFIGURACIÓN ---
-const API_KEY_GROQ = "Api_groq";
-const ELSEVIER_KEY = "apielservier";
+const API_KEY_GROQ = process.env.API_KEY_GROQ;
+const ELSEVIER_KEY = process.env.ELSEVIER_KEY;
 const MODELO_IA = "llama-3.3-70b-versatile";
 
 const groq = new Groq({ apiKey: API_KEY_GROQ });
