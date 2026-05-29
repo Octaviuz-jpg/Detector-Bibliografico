@@ -83,12 +83,12 @@ async function buscarOrcidPorNombreExacto(nombreCompleto) {
     const parsed = parsearNombreAutor(nombreCompleto);
     if (!parsed || !parsed.apellido || parsed.apellido.length < 2) return null;
 
+    const queryParts = [`family-name:${parsed.apellido}`];
+    if (parsed.nombres) queryParts.unshift(`given-names:${parsed.nombres}`);
+
     const res = await axios
       .get("https://pub.orcid.org/v3.0/expanded-search/", {
-        params: {
-          q: `given-names:${parsed.nombres} AND family-name:${parsed.apellido}`,
-          rows: 1,
-        },
+        params: { q: queryParts.join(" AND "), rows: 1 },
         headers: { Accept: "application/json" },
       })
       .catch((err) => {
@@ -404,26 +404,14 @@ async function buscarLibroEnGoogleBooks(titulo, apellidoAutor) {
   }
 }
 
-// --- PROCESAMIENTO CONCURRENTE CONTROLADO ---
-async function procesarConcurrente(items, fn, concurrency = 2, spacingMs = 1500) {
-  const resultados = Array(items.length).fill(null);
-  const ejecutando = new Set();
-  let idx = 0;
-
-  async function procesarSiguiente() {
-    const i = idx++;
-    if (i >= items.length) return;
-    const promesa = fn(items[i], i).then((r) => { resultados[i] = r; }).finally(() => ejecutando.delete(promesa));
-    ejecutando.add(promesa);
-    if (ejecutando.size >= concurrency) {
-      await Promise.race(ejecutando);
-    }
-    await esperar(spacingMs);
-    return procesarSiguiente();
+// --- PROCESAMIENTO SECUENCIAL CON ESPACIADO ---
+async function procesarSecuencial(items, fn, spacingMs = 1500) {
+  const resultados = [];
+  for (let i = 0; i < items.length; i++) {
+    const r = await fn(items[i], i);
+    resultados.push(r);
+    if (i < items.length - 1) await esperar(spacingMs);
   }
-
-  const iniciadores = Array.from({ length: Math.min(concurrency, items.length) }, () => procesarSiguiente());
-  await Promise.allSettled(iniciadores);
   return resultados;
 }
 
@@ -486,8 +474,8 @@ export const procesarBibliografiaHibrida = async (req, res) => {
     const infoTema = dataIA.tema_analizado;
     const listaReferencias = dataIA.referencias || [];
 
-    // Procesar metadatos de fuente (2 concurrentes, 2s entre cada uno)
-    const metadatosLote = await procesarConcurrente(
+    // Procesar metadatos de fuente (secuencial, 1.5s entre cada uno)
+    const metadatosLote = await procesarSecuencial(
       listaReferencias,
       async (ref) => {
         if (ref.tipo === "libro") {
@@ -499,27 +487,26 @@ export const procesarBibliografiaHibrida = async (req, res) => {
         }
         return await auditarRevista(ref);
       },
-      2,
-      2000,
+      1500,
     );
 
-    // Procesar autores (2 concurrentes, 2s entre cada referencia)
-    const autoresLote = await procesarConcurrente(
+    // Procesar autores (secuencial, 2s entre cada referencia)
+    const autoresLote = await procesarSecuencial(
       listaReferencias,
       async (ref) => {
         const listaAutores = Array.isArray(ref.autores_lista)
           ? ref.autores_lista
           : [ref.autores_lista];
 
-        const resultados = await Promise.allSettled(
-          listaAutores.map((nombre) => auditarAutorSemanticScholar(nombre, ref.doi_pdf)),
-        );
+        const resultados = [];
+        for (const nombre of listaAutores) {
+          const info = await auditarAutorSemanticScholar(nombre, ref.doi_pdf);
+          if (info) resultados.push(info);
+          await esperar(1500);
+        }
 
-        return resultados
-          .map((r) => (r.status === "fulfilled" ? r.value : null))
-          .filter(Boolean);
+        return resultados;
       },
-      2,
       2000,
     );
 
