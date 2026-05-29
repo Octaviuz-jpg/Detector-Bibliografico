@@ -9,7 +9,17 @@ const app = express();
 const port = 3000;
 
 // Configuración de multer: guarda los archivos en la carpeta "uploads/"
-const upload = multer({ dest: "uploads/" });
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === "application/pdf") {
+      cb(null, true);
+    } else {
+      cb(new Error("Solo se permiten archivos PDF"), false);
+    }
+  },
+});
 
 app.use(express.json());
 
